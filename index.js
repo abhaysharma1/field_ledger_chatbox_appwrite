@@ -1,7 +1,7 @@
 const { Configuration, OpenAIApi } = require('openai');
 const fetch = require('node-fetch');
 const Client = require('@storacha/client');
-const Proof = require('@storacha/client/proof');
+const Delegation = require('@storacha/client/delegation');
 
 const openai = new OpenAIApi(
   new Configuration({ apiKey: process.env.OPENAI_API_KEY })
@@ -22,7 +22,7 @@ module.exports = async function (req, res) {
       });
     }
 
-    // 1️⃣ Extract product JSON from OpenAI
+    // 1️⃣ Extract product JSON
     let product;
     const completion = await openai.createChatCompletion({
       model: 'gpt-4o-mini',
@@ -30,7 +30,7 @@ module.exports = async function (req, res) {
         {
           role: 'system',
           content:
-            'Extract clean product details in JSON. Only output valid JSON with keys: name, description, price (USD), origin, batch.',
+            'Extract clean product details in JSON. Only output JSON with keys: name, description, price (USD), origin, batch.',
         },
         ...messages,
       ],
@@ -57,10 +57,15 @@ module.exports = async function (req, res) {
       product.price_in_eth = null;
     }
 
-    // 3️⃣ Storcha: load UCAN proof from env
-    const proof = await Proof.parse(process.env.STORCHA_PROOF);
+    // 3️⃣ Storcha: parse UCAN proof from env
+    const proofBytes = Buffer.from(process.env.STORCHA_PROOF, 'base64');
+    const delegation = await Delegation.extract(proofBytes);
+    if (!delegation.ok) {
+      throw new Error('Failed to parse Storcha proof: ' + delegation.error);
+    }
+
     const client = await Client.create();
-    const space = await client.addSpace(proof);
+    const space = await client.addSpace(delegation.ok);
     client.setCurrentSpace(space.did());
 
     // 4️⃣ Upload product JSON
@@ -69,10 +74,9 @@ module.exports = async function (req, res) {
     });
     const cid = (await client.uploadFile(blob)).toString();
 
-    // 5️⃣ Build gateway URL for quick preview
+    // 5️⃣ Build gateway URL
     const gatewayUrl = `https://${cid}.ipfs.storacha.link`;
 
-    // 6️⃣ Return response
     return res.json({
       response: JSON.stringify({
         product,
