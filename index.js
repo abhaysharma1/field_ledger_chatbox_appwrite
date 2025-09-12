@@ -1,29 +1,33 @@
-const { OpenAI } = require("openai");
+const { Configuration, OpenAIApi } = require("openai");
 
-exports.main = async function (req, res) {
+const openai = new OpenAIApi(
+  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
+);
+
+module.exports = async function (req, res) {
   try {
-    const body = JSON.parse(req.payload || '{}');
-    const messages = body.messages;
+    const { messages } = JSON.parse(req.payload || "{}");
 
-    if (!messages) {
-      return res.json({ error: "Messages missing" });
+    if (!messages || !messages.length) {
+      return res.json({
+        response: JSON.stringify({ reply: { role: "assistant", content: "⚠️ No messages received." } })
+      });
     }
 
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+    const completion = await openai.createChatCompletion({
+      model: "gpt-3.5-turbo",
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
     });
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // or another model you prefer
-      messages: messages,
-      max_tokens: 500
-    });
+    const reply = {
+      role: "assistant",
+      content: completion.data.choices[0].message.content,
+    };
 
-    const reply = completion.choices[0].message;
-
-    res.json({ reply });
+    return res.json({ response: JSON.stringify({ reply }) });
   } catch (error) {
-    console.error("ChatGPT error:", error);
-    res.json({ error: error.message });
+    return res.json({
+      response: JSON.stringify({ reply: { role: "assistant", content: `⚠️ Error: ${error.message}` } })
+    });
   }
 };
