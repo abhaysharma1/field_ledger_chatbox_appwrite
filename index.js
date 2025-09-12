@@ -6,6 +6,7 @@ const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
 
+// Use global fetch if available (Node 18+). Otherwise require node-fetch.
 let fetchFn = global.fetch;
 try {
   if (!fetchFn) fetchFn = require('node-fetch');
@@ -15,6 +16,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
+// Helpers
 function base64ToUint8(b64) {
   return Uint8Array.from(Buffer.from(b64, 'base64'));
 }
@@ -24,7 +26,7 @@ function uint8ToBase64(u8) {
 
 module.exports = async function (req, res) {
   try {
-    // 📨 Parse payload
+    // 📨 Parse payload safely
     let body = {};
     try {
       body = JSON.parse(req.payload || '{}');
@@ -38,14 +40,12 @@ module.exports = async function (req, res) {
     if (!messages || !messages.length) {
       return res.send(
         JSON.stringify({
-          response: JSON.stringify({
-            reply: { role: 'assistant', content: '⚠️ No messages received.' },
-          }),
+          reply: { role: 'assistant', content: '⚠️ No messages received.' },
         })
       );
     }
 
-    // 1) Ask ChatGPT to extract product JSON
+    // 1) Ask ChatGPT for product JSON
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -65,7 +65,7 @@ module.exports = async function (req, res) {
     let product;
     try {
       product = JSON.parse(replyMsg);
-    } catch (e) {
+    } catch {
       throw new Error('AI did not return valid JSON: ' + replyMsg);
     }
 
@@ -120,7 +120,7 @@ module.exports = async function (req, res) {
     // 4) Generate QR code
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // 5) Generate proof
+    // 5) Create proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
@@ -164,29 +164,22 @@ module.exports = async function (req, res) {
       algo: 'ed25519+base64',
     };
 
-    // ✅ Return response
+    // ✅ Send final response
     return res.send(
       JSON.stringify({
-        response: JSON.stringify({
-          product,
-          cid,
-          gatewayUrl,
-          qrDataUrl,
-          proof,
-          reply: {
-            role: 'assistant',
-            content: '✅ Stored on IPFS and signed.',
-          },
-        }),
+        product,
+        cid,
+        gatewayUrl,
+        qrDataUrl,
+        proof,
+        reply: { role: 'assistant', content: '✅ Stored on IPFS and signed.' },
       })
     );
   } catch (error) {
     console.error('❌ Function error:', error);
     return res.send(
       JSON.stringify({
-        response: JSON.stringify({
-          reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
-        }),
+        reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
       })
     );
   }
