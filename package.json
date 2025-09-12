@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "description": "Appwrite function for ChatGPT integration",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
+    "@ipld/car": "^5.4.2",
     "@storacha/client": "^1.7.10",
+    "@ucanto/core": "^10.4.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
     "node-appwrite": "^19.0.0",
     "node-fetch": "^3.3.2",
     "openai": "^5.20.2"
