@@ -1,5 +1,3 @@
-dotenv.config();
-
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
