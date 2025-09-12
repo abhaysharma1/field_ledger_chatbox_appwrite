@@ -1,12 +1,9 @@
-// index.js - Appwrite function (Node.js, CommonJS)
-const dotenv = require('dotenv');
 dotenv.config();
 
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
 
-// Node 18+ has global fetch
 let fetchFn = global.fetch;
 try {
   if (!fetchFn) fetchFn = require('node-fetch');
@@ -16,7 +13,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
-// Helpers
 function base64ToUint8(b64) {
   return Uint8Array.from(Buffer.from(b64, 'base64'));
 }
@@ -31,7 +27,7 @@ module.exports = async function (req, context) {
     try {
       body = JSON.parse(req.payload || '{}');
     } catch (err) {
-      context.error('❌ Payload parse error:', err);
+      context.log('❌ Payload parse error:', err);
     }
 
     const { messages } = body;
@@ -47,7 +43,7 @@ module.exports = async function (req, context) {
       );
     }
 
-    // 1) Ask ChatGPT to extract structured product JSON
+    // 1) Ask ChatGPT to extract product JSON
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -119,10 +115,10 @@ module.exports = async function (req, context) {
     const cid = pinJson.IpfsHash;
     const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
 
-    // 4) Generate QR code (data URL)
+    // 4) Generate QR code
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // 5) Generate Ed25519 proof
+    // 5) Generate proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
@@ -166,7 +162,7 @@ module.exports = async function (req, context) {
       algo: 'ed25519+base64',
     };
 
-    // 6) Respond
+    // ✅ Return response
     return context.res.send(
       JSON.stringify({
         response: JSON.stringify({
@@ -183,7 +179,7 @@ module.exports = async function (req, context) {
       })
     );
   } catch (error) {
-    context.error('❌ Function error:', error);
+    context.log('❌ Function error:', error);
     return context.res.send(
       JSON.stringify({
         response: JSON.stringify({
