@@ -24,7 +24,7 @@ module.exports = async function (req, res) {
       content: completion.data.choices[0].message.content,
     };
 
-    context.log(JSON.stringify({ reply }));
+    log(JSON.stringify({ reply }));
 
     return res.json({ response: JSON.stringify({ reply }) });
   } catch (error) {
