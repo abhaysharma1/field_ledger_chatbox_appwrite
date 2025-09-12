@@ -1,14 +1,12 @@
 const { Configuration, OpenAIApi } = require('openai');
 const fetch = require('node-fetch');
+const Client = require('@storacha/client');
+const Proof = require('@storacha/client/proof');
 
 const openai = new OpenAIApi(
   new Configuration({ apiKey: process.env.OPENAI_API_KEY })
 );
 
-const STORCHA_API = 'https://api.storcha.org/upload';
-const STORCHA_KEY = process.env.STORCHA_API_KEY;
-
-// CoinGecko endpoint for price
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
@@ -24,118 +22,62 @@ module.exports = async function (req, res) {
       });
     }
 
-    // Function to fetch ETH price in USD
-    async function getEthPriceUSD() {
-      const resp = await fetch(COINGECKO_ETH_PRICE_API);
-      if (!resp.ok) {
-        throw new Error(`CoinGecko API error: ${resp.statusText}`);
-      }
-      const json = await resp.json();
-      if (!json.ethereum || typeof json.ethereum.usd !== 'number') {
-        throw new Error('Unexpected format from ETH price API');
-      }
-      return json.ethereum.usd; // e.g. 1800.23
-    }
-
-    // 1️⃣ Extract product JSON from ChatGPT
+    // 1️⃣ Extract product JSON from OpenAI
     let product;
-    let attempt = 0;
-    const maxAttempts = 2;
-
-    while (attempt < maxAttempts) {
-      attempt++;
-      const completion = await openai.createChatCompletion({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are an AI that extracts clean product details in JSON. Only output valid JSON with keys: name, description, price (in USD), origin, batch. Do not output any other text.',
-          },
-          ...messages,
-        ],
-      });
-
-      const aiOutput = completion.data.choices[0].message.content;
-
-      // Try parse JSON
-      try {
-        product = JSON.parse(aiOutput);
-        // Check required fields
-        if (
-          typeof product.name === 'string' &&
-          typeof product.description === 'string' &&
-          (typeof product.price === 'number' ||
-            typeof product.price === 'string') &&
-          typeof product.origin === 'string' &&
-          typeof product.batch === 'string'
-        ) {
-          break; // valid, exit loop
-        } else {
-          // Throw to retry
-          throw new Error('Missing or invalid product fields');
-        }
-      } catch (e) {
-        if (attempt >= maxAttempts) {
-          // If final attempt, respond with error
-          return res.json({
-            response: JSON.stringify({
-              reply: {
-                role: 'assistant',
-                content: `⚠️ Error parsing product JSON: ${e.message}`,
-              },
-            }),
-          });
-        }
-        // else retry one more time
-      }
-    }
-
-    // 2️⃣ Add timestamp
-    product.timestamp = new Date().toISOString();
-
-    // 3️⃣ Fetch ETH price and convert product.price → ETH equivalent
-    let ethPriceUSD;
-    try {
-      ethPriceUSD = await getEthPriceUSD();
-    } catch (e) {
-      // If ETH price API fails, still continue but set ethPriceUSD = null
-      ethPriceUSD = null;
-    }
-
-    if (ethPriceUSD && typeof product.price === 'number') {
-      product.price_in_eth = product.price / ethPriceUSD;
-    } else {
-      // If price is string, try parse; or if ethPriceUSD unavailable
-      const priceNum = parseFloat(product.price);
-      if (!isNaN(priceNum) && ethPriceUSD) {
-        product.price_in_eth = priceNum / ethPriceUSD;
-      } else {
-        product.price_in_eth = null; // indicate not available
-      }
-    }
-
-    // 4️⃣ Upload product JSON to Storcha
-    const uploadRes = await fetch(STORCHA_API, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${STORCHA_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(product),
+    const completion = await openai.createChatCompletion({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Extract clean product details in JSON. Only output valid JSON with keys: name, description, price (USD), origin, batch.',
+        },
+        ...messages,
+      ],
     });
 
-    if (!uploadRes.ok) {
-      throw new Error(`Storcha upload failed: ${uploadRes.statusText}`);
+    try {
+      product = JSON.parse(completion.data.choices[0].message.content);
+    } catch {
+      throw new Error('AI response was not valid JSON');
     }
 
-    const { cid } = await uploadRes.json();
+    // 2️⃣ Add timestamp + ETH conversion
+    product.timestamp = new Date().toISOString();
+    try {
+      const resp = await fetch(COINGECKO_ETH_PRICE_API);
+      const ethPriceUSD = (await resp.json()).ethereum.usd;
+      const priceNum = parseFloat(product.price);
+      if (!isNaN(priceNum)) {
+        product.price_in_eth = +(priceNum / ethPriceUSD).toFixed(6);
+      } else {
+        product.price_in_eth = null;
+      }
+    } catch {
+      product.price_in_eth = null;
+    }
 
-    // 5️⃣ Return product + CID
+    // 3️⃣ Storcha: load UCAN proof from env
+    const proof = await Proof.parse(process.env.STORCHA_PROOF);
+    const client = await Client.create();
+    const space = await client.addSpace(proof);
+    client.setCurrentSpace(space.did());
+
+    // 4️⃣ Upload product JSON
+    const blob = new Blob([JSON.stringify(product)], {
+      type: 'application/json',
+    });
+    const cid = (await client.uploadFile(blob)).toString();
+
+    // 5️⃣ Build gateway URL for quick preview
+    const gatewayUrl = `https://${cid}.ipfs.storacha.link`;
+
+    // 6️⃣ Return response
     return res.json({
       response: JSON.stringify({
         product,
         cid,
+        gatewayUrl,
         reply: {
           role: 'assistant',
           content: '✅ Product stored successfully on Storcha.',

@@ -1,14 +1,16 @@
 {
   "name": "starter-template",
- "version": "1.0.0",
+  "version": "1.0.0",
   "description": "Appwrite function for ChatGPT integration",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "openai": "^5.2.0",
-    "node-appwrite": "^19.0.0"
+    "@storacha/client": "^1.7.10",
+    "node-appwrite": "^19.0.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^5.20.2"
   },
   "engines": {
     "node": "20"
