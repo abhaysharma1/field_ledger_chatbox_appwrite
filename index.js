@@ -5,22 +5,16 @@ const OpenAI = require("openai");
 
 const app = express();
 
-// -----------------------
-// Middlewares
-// -----------------------
-app.use(cors({ origin: "*" })); // Allow all origins
+// CORS middleware
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// -----------------------
-// Initialize OpenAI
-// -----------------------
+// OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// -----------------------
-// Route
-// -----------------------
+// Express route
 app.post("/", async (req, res) => {
   try {
     const { messages } = req.body;
@@ -44,9 +38,8 @@ app.post("/", async (req, res) => {
     };
 
     return res.json({ response: JSON.stringify({ reply }) });
-
   } catch (error) {
-    console.error("OpenAI error:", error);
+    console.error(error);
     return res.json({
       response: JSON.stringify({
         reply: { role: "assistant", content: `⚠️ Error: ${error.message}` }
@@ -56,6 +49,6 @@ app.post("/", async (req, res) => {
 });
 
 // -----------------------
-// Export handler for Appwrite
+// Export a callable function for Appwrite
 // -----------------------
 module.exports = serverless(app);
