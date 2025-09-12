@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const serverless = require("serverless-http");
 const OpenAI = require("openai");
 
 const app = express();
@@ -8,7 +9,7 @@ const app = express();
 // Middlewares
 // -----------------------
 app.use(cors({ origin: "*" })); // Allow all origins
-app.use(express.json()); // Parse JSON payloads
+app.use(express.json());
 
 // -----------------------
 // Initialize OpenAI
@@ -18,7 +19,7 @@ const openai = new OpenAI({
 });
 
 // -----------------------
-// Route for POST /
+// Route
 // -----------------------
 app.post("/", async (req, res) => {
   try {
@@ -55,7 +56,6 @@ app.post("/", async (req, res) => {
 });
 
 // -----------------------
-// Start server
+// Export handler for Appwrite
 // -----------------------
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+module.exports = serverless(app);
