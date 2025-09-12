@@ -1,7 +1,12 @@
+// index.js - Appwrite function (Node.js, CommonJS)
+const dotenv = require('dotenv');
+dotenv.config();
+
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
 
+// Node 18+ has global fetch
 let fetchFn = global.fetch;
 try {
   if (!fetchFn) fetchFn = require('node-fetch');
@@ -11,6 +16,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
+// Helpers
 function base64ToUint8(b64) {
   return Uint8Array.from(Buffer.from(b64, 'base64'));
 }
@@ -18,20 +24,21 @@ function uint8ToBase64(u8) {
   return Buffer.from(u8).toString('base64');
 }
 
-module.exports = async function (req, res) {
+module.exports = async function (req, context) {
   try {
+    // 📨 Parse payload
     let body = {};
     try {
       body = JSON.parse(req.payload || '{}');
     } catch (err) {
-      console.error('❌ Payload parse error:', err);
+      context.error('❌ Payload parse error:', err);
     }
 
     const { messages } = body;
-    console.log('📩 Incoming messages:', messages);
+    context.log('📩 Incoming messages:', messages);
 
     if (!messages || !messages.length) {
-      return res.send(
+      return context.res.send(
         JSON.stringify({
           response: JSON.stringify({
             reply: { role: 'assistant', content: '⚠️ No messages received.' },
@@ -40,7 +47,7 @@ module.exports = async function (req, res) {
       );
     }
 
-    // 1) Ask ChatGPT to extract product JSON
+    // 1) Ask ChatGPT to extract structured product JSON
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -112,10 +119,10 @@ module.exports = async function (req, res) {
     const cid = pinJson.IpfsHash;
     const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
 
-    // 4) Generate QR code
+    // 4) Generate QR code (data URL)
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // 5) Generate proof
+    // 5) Generate Ed25519 proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
@@ -146,7 +153,7 @@ module.exports = async function (req, res) {
       const sig = nacl.sign.detached(Buffer.from(proofMessage), kp.secretKey);
       signatureBase64 = uint8ToBase64(sig);
       publicKeyBase64 = uint8ToBase64(kp.publicKey);
-      console.log(
+      context.log(
         '⚠️ WARNING: No PROOF_PRIVATE_KEY set. Ephemeral key used. Public key:',
         publicKeyBase64
       );
@@ -159,8 +166,8 @@ module.exports = async function (req, res) {
       algo: 'ed25519+base64',
     };
 
-    // ✅ Return correctly for Appwrite
-    return res.send(
+    // 6) Respond
+    return context.res.send(
       JSON.stringify({
         response: JSON.stringify({
           product,
@@ -176,8 +183,8 @@ module.exports = async function (req, res) {
       })
     );
   } catch (error) {
-    console.error('❌ Function error:', error);
-    return res.send(
+    context.error('❌ Function error:', error);
+    return context.res.send(
       JSON.stringify({
         response: JSON.stringify({
           reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
