@@ -1,14 +1,16 @@
 {
-  "name": "chatbox-api",
-   "version": "1.0.0",
-  "main": "index.js",
-  "dependencies": {
-    "openai": "^4.9.0",
-    "nft.storage": "^5.0.0"
-  },
+  "name": "starter-template",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "format": "prettier --write ."
   },
-  "author": "",
-  "license": "ISC"
+  "dependencies": {
+    "node-appwrite": "^14.1.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5"
+  }
 }
