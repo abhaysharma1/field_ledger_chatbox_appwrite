@@ -1,23 +1,16 @@
-// index.js (CommonJS) - Appwrite function
-const dotenv = require('dotenv');
-dotenv.config();
-
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
 
-// Node 18+ has global fetch, fallback to node-fetch if not
 let fetchFn = global.fetch;
 try {
   if (!fetchFn) fetchFn = require('node-fetch');
 } catch (e) {}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
-// Helpers
 function base64ToUint8(b64) {
   return Uint8Array.from(Buffer.from(b64, 'base64'));
 }
@@ -27,7 +20,6 @@ function uint8ToBase64(u8) {
 
 module.exports = async function (req, res) {
   try {
-    // 📨 Read payload from Appwrite
     let body = {};
     try {
       body = JSON.parse(req.payload || '{}');
@@ -39,14 +31,16 @@ module.exports = async function (req, res) {
     console.log('📩 Incoming messages:', messages);
 
     if (!messages || !messages.length) {
-      return res.json({
-        response: JSON.stringify({
-          reply: { role: 'assistant', content: '⚠️ No messages received.' },
-        }),
-      });
+      return res.send(
+        JSON.stringify({
+          response: JSON.stringify({
+            reply: { role: 'assistant', content: '⚠️ No messages received.' },
+          }),
+        })
+      );
     }
 
-    // 1) Ask ChatGPT to extract clean JSON
+    // 1) Ask ChatGPT to extract product JSON
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -121,7 +115,7 @@ module.exports = async function (req, res) {
     // 4) Generate QR code
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // 5) Generate cryptographic proof (cid + timestamp)
+    // 5) Generate proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
@@ -148,7 +142,6 @@ module.exports = async function (req, res) {
       signatureBase64 = uint8ToBase64(sig);
       publicKeyBase64 = uint8ToBase64(publicKey);
     } else {
-      // fallback for dev/testing
       const kp = nacl.sign.keyPair();
       const sig = nacl.sign.detached(Buffer.from(proofMessage), kp.secretKey);
       signatureBase64 = uint8ToBase64(sig);
@@ -166,23 +159,30 @@ module.exports = async function (req, res) {
       algo: 'ed25519+base64',
     };
 
-    // 6) Return everything to frontend
-    return res.json({
-      response: JSON.stringify({
-        product,
-        cid,
-        gatewayUrl,
-        qrDataUrl,
-        proof,
-        reply: { role: 'assistant', content: '✅ Stored on IPFS and signed.' },
-      }),
-    });
+    // ✅ Return correctly for Appwrite
+    return res.send(
+      JSON.stringify({
+        response: JSON.stringify({
+          product,
+          cid,
+          gatewayUrl,
+          qrDataUrl,
+          proof,
+          reply: {
+            role: 'assistant',
+            content: '✅ Stored on IPFS and signed.',
+          },
+        }),
+      })
+    );
   } catch (error) {
     console.error('❌ Function error:', error);
-    return res.json({
-      response: JSON.stringify({
-        reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
-      }),
-    });
+    return res.send(
+      JSON.stringify({
+        response: JSON.stringify({
+          reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
+        }),
+      })
+    );
   }
 };
