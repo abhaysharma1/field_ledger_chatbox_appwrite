@@ -1,3 +1,7 @@
+// index.js - Appwrite function (Node.js, CommonJS)
+const dotenv = require('dotenv');
+dotenv.config();
+
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
@@ -18,21 +22,21 @@ function uint8ToBase64(u8) {
   return Buffer.from(u8).toString('base64');
 }
 
-module.exports = async function (req, context) {
+module.exports = async function (req, res) {
   try {
     // 📨 Parse payload
     let body = {};
     try {
       body = JSON.parse(req.payload || '{}');
     } catch (err) {
-      context.log('❌ Payload parse error:', err);
+      console.error('❌ Payload parse error:', err);
     }
 
     const { messages } = body;
-    context.log('📩 Incoming messages:', messages);
+    console.log('📩 Incoming messages:', messages);
 
     if (!messages || !messages.length) {
-      return context.res.send(
+      return res.send(
         JSON.stringify({
           response: JSON.stringify({
             reply: { role: 'assistant', content: '⚠️ No messages received.' },
@@ -147,7 +151,7 @@ module.exports = async function (req, context) {
       const sig = nacl.sign.detached(Buffer.from(proofMessage), kp.secretKey);
       signatureBase64 = uint8ToBase64(sig);
       publicKeyBase64 = uint8ToBase64(kp.publicKey);
-      context.log(
+      console.log(
         '⚠️ WARNING: No PROOF_PRIVATE_KEY set. Ephemeral key used. Public key:',
         publicKeyBase64
       );
@@ -161,7 +165,7 @@ module.exports = async function (req, context) {
     };
 
     // ✅ Return response
-    return context.res.send(
+    return res.send(
       JSON.stringify({
         response: JSON.stringify({
           product,
@@ -177,8 +181,8 @@ module.exports = async function (req, context) {
       })
     );
   } catch (error) {
-    context.log('❌ Function error:', error);
-    return context.res.send(
+    console.error('❌ Function error:', error);
+    return res.send(
       JSON.stringify({
         response: JSON.stringify({
           reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
