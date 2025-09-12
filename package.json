@@ -1,13 +1,16 @@
 {
-  "name": "chatbox-api",
-   "version": "1.0.0",
-  "main": "index.js",
+  "name": "starter-template",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "format": "prettier --write ."
+  },
   "dependencies": {
     "openai": "^4.9.0"
   },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {
+    "prettier": "^3.2.5"
+  }
 }
