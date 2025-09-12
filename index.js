@@ -6,14 +6,22 @@ const openai = new OpenAI({
 
 module.exports = async function (context) {
   try {
-    const { payload } = context.req;
-    context.log('📩 Raw payload:', payload);
+    // 🔎 Fix: use bodyRaw instead of payload
+    const raw = context.req.bodyRaw || '{}';
+    context.log('📩 Raw body:', raw);
 
-    const { messages } = JSON.parse(payload || '{}');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      parsed = {};
+    }
+
+    const messages = parsed.messages;
     context.log('📦 Parsed messages:', JSON.stringify(messages));
 
     if (!messages || !messages.length) {
-      context.log('⚠️ No messages received in payload.');
+      context.log('⚠️ No messages received.');
       return context.res.send({
         response: JSON.stringify({
           reply: { role: 'assistant', content: '⚠️ No messages received.' },
@@ -21,11 +29,10 @@ module.exports = async function (context) {
       });
     }
 
-    // 🔮 Call OpenAI
-    context.log('🤖 Sending to OpenAI:', JSON.stringify(messages));
+    // 🔮 Ask OpenAI
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: messages,
+      messages,
     });
 
     const replyMsg = completion.choices?.[0]?.message?.content || '';
