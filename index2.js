@@ -1,4 +1,4 @@
-// index.js - Appwrite function (Node.js, context API)
+// index.js - Appwrite function (Node.js)
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
@@ -8,7 +8,10 @@ try {
   if (!fetchFn) fetchFn = require('node-fetch');
 } catch (e) {}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
@@ -23,6 +26,8 @@ function uint8ToBase64(u8) {
 module.exports = async function (context) {
   try {
     const raw = context.req.bodyRaw || '{}';
+    context.log('📩 Raw body:', raw);
+
     let parsed;
     try {
       parsed = JSON.parse(raw);
@@ -31,6 +36,8 @@ module.exports = async function (context) {
     }
 
     const { messages } = parsed;
+    context.log('📦 Parsed messages:', JSON.stringify(messages));
+
     if (!messages || !messages.length) {
       return context.res.send({
         response: JSON.stringify({
@@ -39,38 +46,31 @@ module.exports = async function (context) {
       });
     }
 
-    // 🧠 Step 1: Ask GPT to check if all product details are present
-    const validation = await openai.chat.completions.create({
+    // 1) Ask OpenAI for structured product JSON
+    const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
           content:
-            'You are a helpful assistant collecting farm product details. ' +
-            'Required fields: name, description, price (USD), origin, batch. ' +
-            'If user hasn’t provided all fields, ask for the missing ones in natural language. ' +
-            'If all fields are present, output JSON only with those fields.',
+            'Extract clean product details as JSON. Only output JSON with keys: name, description, price (USD), origin, batch.',
         },
         ...messages,
       ],
     });
 
-    const validationReply = validation.choices?.[0]?.message?.content || '';
+    const replyMsg = completion.choices?.[0]?.message?.content || '';
+    context.log('✅ OpenAI reply:', replyMsg);
 
     let product;
     try {
-      product = JSON.parse(validationReply);
+      product = JSON.parse(replyMsg);
     } catch {
-      // Not valid JSON → GPT is still asking questions
-      return context.res.send({
-        response: JSON.stringify({
-          reply: { role: 'assistant', content: validationReply },
-        }),
-      });
+      throw new Error('AI did not return valid JSON: ' + replyMsg);
     }
 
-    // 🧠 Step 2: If we got a full product JSON → enrich + store
+    // 2) Add timestamp + ETH conversion
     const timestamp = new Date().toISOString();
     product.timestamp = timestamp;
 
@@ -85,7 +85,7 @@ module.exports = async function (context) {
       product.price_in_eth = null;
     }
 
-    // Upload JSON to Pinata
+    // 3) Upload JSON to Pinata
     const pinRes = await fetchFn(
       'https://api.pinata.cloud/pinning/pinJSONToIPFS',
       {
@@ -109,9 +109,11 @@ module.exports = async function (context) {
 
     const cid = pinJson.IpfsHash;
     const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
+
+    // 4) Generate QR code
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // Generate proof
+    // 5) Generate proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
@@ -141,6 +143,7 @@ module.exports = async function (context) {
       const sig = nacl.sign.detached(Buffer.from(proofMessage), kp.secretKey);
       signatureBase64 = uint8ToBase64(sig);
       publicKeyBase64 = uint8ToBase64(kp.publicKey);
+      context.log('⚠️ Ephemeral key used. Public key:', publicKeyBase64);
     }
 
     const proof = {
@@ -150,7 +153,7 @@ module.exports = async function (context) {
       algo: 'ed25519+base64',
     };
 
-    // ✅ Final response when product stored
+    // ✅ Final response
     return context.res.send({
       response: JSON.stringify({
         product,
@@ -158,13 +161,11 @@ module.exports = async function (context) {
         gatewayUrl,
         qrDataUrl,
         proof,
-        reply: {
-          role: 'assistant',
-          content: '✅ Product stored on IPFS and signed.',
-        },
+        reply: { role: 'assistant', content: '✅ Stored on IPFS and signed.' },
       }),
     });
   } catch (error) {
+    context.error('❌ Function failed:', error);
     return context.res.send({
       response: JSON.stringify({
         reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
