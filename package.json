@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "openai": "^5.2.0",
-    "node-appwrite": "^9.12.0"
+    "node-appwrite": "^19.0.0"
   },
   "engines": {
     "node": "20"
