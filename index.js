@@ -1,54 +1,37 @@
+const express = require("express");
+const cors = require("cors");
 const OpenAI = require("openai");
 
-// Initialize OpenAI with API key from environment variables
+const app = express();
+
+// -----------------------
+// Middlewares
+// -----------------------
+app.use(cors({ origin: "*" })); // Allow all origins
+app.use(express.json()); // Parse JSON payloads
+
+// -----------------------
+// Initialize OpenAI
+// -----------------------
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-module.exports = async function (req, res) {
+// -----------------------
+// Route for POST /
+// -----------------------
+app.post("/", async (req, res) => {
   try {
-    // -----------------------
-    // CORS headers
-    // -----------------------
-    res.setHeader('Access-Control-Allow-Origin', '*'); // allow all domains
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Appwrite-Project, X-Appwrite-Dev-Key');
-
-    // -----------------------
-    // Handle preflight OPTIONS request
-    // -----------------------
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      return res.end();
-    }
-
-    // -----------------------
-    // Parse payload
-    // -----------------------
-    let payload = {};
-    try {
-      payload = JSON.parse(req.payload || "{}");
-    } catch (e) {
-      return res.end(JSON.stringify({
-        response: JSON.stringify({
-          reply: { role: "assistant", content: "⚠️ Invalid JSON payload." }
-        })
-      }));
-    }
-
-    const { messages } = payload;
+    const { messages } = req.body;
 
     if (!messages || !messages.length) {
-      return res.end(JSON.stringify({
+      return res.json({
         response: JSON.stringify({
           reply: { role: "assistant", content: "⚠️ No messages received." }
         })
-      }));
+      });
     }
 
-    // -----------------------
-    // Call OpenAI API
-    // -----------------------
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: messages.map(m => ({ role: m.role, content: m.content })),
@@ -59,19 +42,20 @@ module.exports = async function (req, res) {
       content: completion.choices[0].message.content,
     };
 
-    // -----------------------
-    // Send JSON response
-    // -----------------------
-    res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({ response: JSON.stringify({ reply }) }));
+    return res.json({ response: JSON.stringify({ reply }) });
 
   } catch (error) {
-    console.error("Function error:", error);
-    res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({
+    console.error("OpenAI error:", error);
+    return res.json({
       response: JSON.stringify({
         reply: { role: "assistant", content: `⚠️ Error: ${error.message}` }
       })
-    }));
+    });
   }
-};
+});
+
+// -----------------------
+// Start server
+// -----------------------
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
