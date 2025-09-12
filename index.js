@@ -1,22 +1,21 @@
-// index.js - Appwrite function (Node.js, CommonJS)
-const dotenv = require('dotenv');
-dotenv.config();
-
+// index.js - Appwrite function (Node.js)
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const nacl = require('tweetnacl');
 
-// Use global fetch if available (Node 18+). Otherwise require node-fetch.
 let fetchFn = global.fetch;
 try {
   if (!fetchFn) fetchFn = require('node-fetch');
 } catch (e) {}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const COINGECKO_ETH_PRICE_API =
   'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
 
-// Helpers
+// helpers
 function base64ToUint8(b64) {
   return Uint8Array.from(Buffer.from(b64, 'base64'));
 }
@@ -24,28 +23,30 @@ function uint8ToBase64(u8) {
   return Buffer.from(u8).toString('base64');
 }
 
-module.exports = async function (req, res) {
+module.exports = async function (context) {
   try {
-    // 📨 Parse payload safely
-    let body = {};
+    const raw = context.req.bodyRaw || '{}';
+    context.log('📩 Raw body:', raw);
+
+    let parsed;
     try {
-      body = JSON.parse(req.payload || '{}');
-    } catch (err) {
-      console.error('❌ Payload parse error:', err);
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = {};
     }
 
-    const { messages } = body;
-    console.log('📩 Incoming messages:', messages);
+    const { messages } = parsed;
+    context.log('📦 Parsed messages:', JSON.stringify(messages));
 
     if (!messages || !messages.length) {
-      return res.send(
-        JSON.stringify({
+      return context.res.send({
+        response: JSON.stringify({
           reply: { role: 'assistant', content: '⚠️ No messages received.' },
-        })
-      );
+        }),
+      });
     }
 
-    // 1) Ask ChatGPT for product JSON
+    // 1) Ask OpenAI for structured product JSON
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -59,8 +60,8 @@ module.exports = async function (req, res) {
       ],
     });
 
-    const replyMsg = completion.choices?.[0]?.message?.content;
-    if (!replyMsg) throw new Error('No content returned from OpenAI');
+    const replyMsg = completion.choices?.[0]?.message?.content || '';
+    context.log('✅ OpenAI reply:', replyMsg);
 
     let product;
     try {
@@ -85,22 +86,14 @@ module.exports = async function (req, res) {
     }
 
     // 3) Upload JSON to Pinata
-    const PINATA_API_KEY = process.env.PINATA_API_KEY;
-    const PINATA_SECRET = process.env.PINATA_SECRET_API_KEY;
-    if (!PINATA_API_KEY || !PINATA_SECRET) {
-      throw new Error(
-        'Pinata API keys not found. Set PINATA_API_KEY & PINATA_SECRET_API_KEY in env.'
-      );
-    }
-
     const pinRes = await fetchFn(
       'https://api.pinata.cloud/pinning/pinJSONToIPFS',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          pinata_api_key: PINATA_API_KEY,
-          pinata_secret_api_key: PINATA_SECRET,
+          pinata_api_key: process.env.PINATA_API_KEY,
+          pinata_secret_api_key: process.env.PINATA_SECRET_API_KEY,
         },
         body: JSON.stringify({
           pinataContent: product,
@@ -120,12 +113,11 @@ module.exports = async function (req, res) {
     // 4) Generate QR code
     const qrDataUrl = await QRCode.toDataURL(gatewayUrl);
 
-    // 5) Create proof
+    // 5) Generate proof
     const proofPayload = { cid, timestamp };
     const proofMessage = JSON.stringify(proofPayload);
 
-    let publicKeyBase64;
-    let signatureBase64;
+    let signatureBase64, publicKeyBase64;
     const rawPriv = (process.env.PROOF_PRIVATE_KEY || '').trim();
 
     if (rawPriv) {
@@ -151,10 +143,7 @@ module.exports = async function (req, res) {
       const sig = nacl.sign.detached(Buffer.from(proofMessage), kp.secretKey);
       signatureBase64 = uint8ToBase64(sig);
       publicKeyBase64 = uint8ToBase64(kp.publicKey);
-      console.log(
-        '⚠️ WARNING: No PROOF_PRIVATE_KEY set. Ephemeral key used. Public key:',
-        publicKeyBase64
-      );
+      context.log('⚠️ Ephemeral key used. Public key:', publicKeyBase64);
     }
 
     const proof = {
@@ -164,23 +153,23 @@ module.exports = async function (req, res) {
       algo: 'ed25519+base64',
     };
 
-    // ✅ Send final response
-    return res.send(
-      JSON.stringify({
+    // ✅ Final response
+    return context.res.send({
+      response: JSON.stringify({
         product,
         cid,
         gatewayUrl,
         qrDataUrl,
         proof,
         reply: { role: 'assistant', content: '✅ Stored on IPFS and signed.' },
-      })
-    );
+      }),
+    });
   } catch (error) {
-    console.error('❌ Function error:', error);
-    return res.send(
-      JSON.stringify({
+    context.error('❌ Function failed:', error);
+    return context.res.send({
+      response: JSON.stringify({
         reply: { role: 'assistant', content: `⚠️ Error: ${error.message}` },
-      })
-    );
+      }),
+    });
   }
 };
