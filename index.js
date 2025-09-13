@@ -1,7 +1,4 @@
 // index.js (Appwrite Function - CommonJS)
-// Handles ChatGPT conversation + Pinata upload + QR generation.
-// No Appwrite Database (frontend stores history in localStorage).
-
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -63,7 +60,7 @@ module.exports = async function (context) {
 
     const { mode, product, cid, updates, messages } = payload;
 
-    // ---------- CASE 1: Form Register (manual form submission)
+    // ---------- CASE 1: Form Register
     if (mode === 'form_register' && product) {
       const enriched = { ...product, timestamp: new Date().toISOString() };
       const newCid = await uploadToPinata(enriched);
@@ -81,7 +78,7 @@ module.exports = async function (context) {
       });
     }
 
-    // ---------- CASE 2: Chat Register (ChatGPT collects product JSON)
+    // ---------- CASE 2: Register (chat flow with product JSON)
     if (mode === 'register' && product) {
       const enriched = { ...product, timestamp: new Date().toISOString() };
       const newCid = await uploadToPinata(enriched);
@@ -102,7 +99,7 @@ module.exports = async function (context) {
       });
     }
 
-    // ---------- CASE 3: Verify (customer pastes CID)
+    // ---------- CASE 3: Verify CID
     if (mode === 'verify' && cid && CID_REGEX.test(cid)) {
       try {
         const productData = await fetchFromPinata(cid);
@@ -134,7 +131,7 @@ module.exports = async function (context) {
       }
     }
 
-    // ---------- CASE 4: Update (merge updates and re-pin)
+    // ---------- CASE 4: Update CID
     if (mode === 'update' && cid && updates) {
       try {
         const old = await fetchFromPinata(cid);
@@ -171,14 +168,15 @@ module.exports = async function (context) {
       }
     }
 
-    // ---------- FALLBACK: Pass through to ChatGPT
+    // ---------- FALLBACK: ChatGPT conversation
     if (messages && messages.length) {
       const systemPrompt =
         'You are FieldLedger AI Assistant. Help farmers register products naturally. ' +
-        'Collect required fields: name, description, price (INR), origin, batch. ' +
+        'Required fields: name, description, price (INR), origin, batch. ' +
         'If some fields are missing, ask step by step. ' +
-        'When all fields are collected, output JSON once: {"name":"","description":"","price":"","origin":"","batch":""}. ' +
-        'Customers may provide CID for verification instead.';
+        '⚠️ When all fields are collected, output ONLY the JSON object, no extra text, no markdown. ' +
+        'Format: {"name":"","description":"","price":"","origin":"","batch":""}. ' +
+        'Do not include explanations or code blocks.';
 
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -187,6 +185,43 @@ module.exports = async function (context) {
 
       const replyMsg = completion.choices?.[0]?.message?.content?.trim() || '';
 
+      // Try extracting JSON from reply (even if wrapped in code/text)
+      let product = null;
+      try {
+        const match = replyMsg.match(/\{[\s\S]*\}/);
+        if (match) {
+          const candidate = JSON.parse(match[0]);
+          if (
+            candidate.name &&
+            candidate.description &&
+            candidate.price &&
+            candidate.origin &&
+            candidate.batch
+          ) {
+            product = candidate;
+          }
+        }
+      } catch {}
+
+      // If product JSON found → store on Pinata
+      if (product) {
+        const enriched = { ...product, timestamp: new Date().toISOString() };
+        const newCid = await uploadToPinata(enriched);
+        const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${newCid}`;
+        const qrDataUrl = await generateQR(gatewayUrl);
+
+        return context.res.send({
+          response: JSON.stringify({
+            cid: newCid,
+            gatewayUrl,
+            qrDataUrl,
+            product: enriched,
+            reply: { role: 'assistant', content: '✅ Product stored on IPFS.' },
+          }),
+        });
+      }
+
+      // Otherwise → return normal reply
       return context.res.send({
         response: JSON.stringify({
           reply: { role: 'assistant', content: replyMsg },
@@ -194,7 +229,7 @@ module.exports = async function (context) {
       });
     }
 
-    // ---------- No mode/no messages
+    // ---------- No mode / no messages
     return context.res.send({
       response: JSON.stringify({
         reply: {
