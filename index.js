@@ -17,6 +17,37 @@ const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY;
 
 const CID_REGEX = /^[a-zA-Z0-9]{46,59}$/;
 
+// Case: Verify a product by CID
+if (parsed.mode === 'verify' && parsed.cid && CID_REGEX.test(parsed.cid)) {
+  const cid = parsed.cid;
+  const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
+  try {
+    const resp = await fetchFn(url);
+    const product = await resp.json();
+
+    return context.res.send({
+      response: JSON.stringify({
+        product,
+        cid,
+        gatewayUrl: url,
+        reply: {
+          role: 'assistant',
+          content: `✅ Verified product: "${product.name}", ₹${product.price}, origin: ${product.origin}, batch: ${product.batch}\n\n🔗 View on IPFS: ${url}`,
+        },
+      }),
+    });
+  } catch (e) {
+    return context.res.send({
+      response: JSON.stringify({
+        reply: {
+          role: 'assistant',
+          content: `⚠️ Could not fetch data for CID ${cid}`,
+        },
+      }),
+    });
+  }
+}
+
 // --- Helpers ---
 async function uploadToPinata(content) {
   const res = await fetchFn('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
