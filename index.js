@@ -4,6 +4,7 @@ dotenv.config();
 
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
+const { randomUUID } = require('crypto'); // ✅ to generate unique IDs
 
 let fetchFn = global.fetch;
 try {
@@ -16,37 +17,6 @@ const PINATA_API_KEY = process.env.PINATA_API_KEY;
 const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY;
 
 const CID_REGEX = /^[a-zA-Z0-9]{46,59}$/;
-
-// Case: Verify a product by CID
-if (parsed.mode === 'verify' && parsed.cid && CID_REGEX.test(parsed.cid)) {
-  const cid = parsed.cid;
-  const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
-  try {
-    const resp = await fetchFn(url);
-    const product = await resp.json();
-
-    return context.res.send({
-      response: JSON.stringify({
-        product,
-        cid,
-        gatewayUrl: url,
-        reply: {
-          role: 'assistant',
-          content: `✅ Verified product: "${product.name}", ₹${product.price}, origin: ${product.origin}, batch: ${product.batch}\n\n🔗 View on IPFS: ${url}`,
-        },
-      }),
-    });
-  } catch (e) {
-    return context.res.send({
-      response: JSON.stringify({
-        reply: {
-          role: 'assistant',
-          content: `⚠️ Could not fetch data for CID ${cid}`,
-        },
-      }),
-    });
-  }
-}
 
 // --- Helpers ---
 async function uploadToPinata(content) {
@@ -91,9 +61,18 @@ module.exports = async function (context) {
 
     const { mode, product, cid, updates, messages } = payload;
 
+    // Utility: attach unique ID
+    const addUniqueId = (obj) => ({
+      ...obj,
+      productId: randomUUID(), // ✅ unique ID auto-generated
+    });
+
     // ---------- CASE 1: Form Register
     if (mode === 'form_register' && product) {
-      const enriched = { ...product, timestamp: new Date().toISOString() };
+      const enriched = addUniqueId({
+        ...product,
+        timestamp: new Date().toISOString(),
+      });
       const newCid = await uploadToPinata(enriched);
       const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${newCid}`;
       const qrDataUrl = await generateQR(gatewayUrl);
@@ -111,7 +90,10 @@ module.exports = async function (context) {
 
     // ---------- CASE 2: Register (chat flow with product JSON)
     if (mode === 'register' && product) {
-      const enriched = { ...product, timestamp: new Date().toISOString() };
+      const enriched = addUniqueId({
+        ...product,
+        timestamp: new Date().toISOString(),
+      });
       const newCid = await uploadToPinata(enriched);
       const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${newCid}`;
       const qrDataUrl = await generateQR(gatewayUrl);
@@ -146,7 +128,7 @@ module.exports = async function (context) {
                 productData.name || 'N/A'
               }, price: ₹${productData.price || 'N/A'}, origin: ${
                 productData.origin || 'N/A'
-              }.`,
+              }, ID: ${productData.productId || 'N/A'}.`,
             },
           }),
         });
@@ -171,6 +153,9 @@ module.exports = async function (context) {
           ...updates,
           updatedAt: new Date().toISOString(),
         };
+        // keep old ID, don’t overwrite
+        if (!newProduct.productId) newProduct.productId = randomUUID();
+
         const newCid = await uploadToPinata(newProduct);
         const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${newCid}`;
         const qrDataUrl = await generateQR(gatewayUrl);
@@ -203,10 +188,10 @@ module.exports = async function (context) {
     if (messages && messages.length) {
       const systemPrompt =
         'You are FieldLedger AI Assistant. Help farmers register products naturally. ' +
-        'Required fields: name, description, price (INR), origin, batch. ' +
+        'Required fields: name, description, price (INR), origin. ' + // ✅ batch removed
         'If some fields are missing, ask step by step. ' +
         '⚠️ When all fields are collected, output ONLY the JSON object, no extra text, no markdown. ' +
-        'Format: {"name":"","description":"","price":"","origin":"","batch":""}. ' +
+        'Format: {"name":"","description":"","price":"","origin":""}. ' +
         'Do not include explanations or code blocks.';
 
       const completion = await openai.chat.completions.create({
@@ -216,7 +201,7 @@ module.exports = async function (context) {
 
       const replyMsg = completion.choices?.[0]?.message?.content?.trim() || '';
 
-      // Try extracting JSON from reply (even if wrapped in code/text)
+      // Try extracting JSON from reply
       let product = null;
       try {
         const match = replyMsg.match(/\{[\s\S]*\}/);
@@ -226,17 +211,18 @@ module.exports = async function (context) {
             candidate.name &&
             candidate.description &&
             candidate.price &&
-            candidate.origin &&
-            candidate.batch
+            candidate.origin
           ) {
             product = candidate;
           }
         }
       } catch {}
 
-      // If product JSON found → store on Pinata
       if (product) {
-        const enriched = { ...product, timestamp: new Date().toISOString() };
+        const enriched = addUniqueId({
+          ...product,
+          timestamp: new Date().toISOString(),
+        });
         const newCid = await uploadToPinata(enriched);
         const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${newCid}`;
         const qrDataUrl = await generateQR(gatewayUrl);
@@ -252,7 +238,6 @@ module.exports = async function (context) {
         });
       }
 
-      // Otherwise → return normal reply
       return context.res.send({
         response: JSON.stringify({
           reply: { role: 'assistant', content: replyMsg },
